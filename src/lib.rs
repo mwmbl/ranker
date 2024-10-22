@@ -2,7 +2,9 @@ mod utils;
 
 use arrayvec::ArrayString;
 use std::cmp::max;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
+use regex::Regex;
 use url::Url;
 use wasm_bindgen::prelude::*;
 
@@ -53,17 +55,40 @@ impl SearchResult {
     }
 }
 
+
+struct MatchFeatures {
+    last_char: u8,
+    length: u8,
+    total_possible_length: u8,
+    num_terms: u8,
+    score: f32,
+    term_proportion: f32,
+}
+
+struct Features {
+    title_match: MatchFeatures,
+    extract_match: MatchFeatures,
+    domain_match: MatchFeatures,
+    path_match: MatchFeatures,
+}
+
+
 #[wasm_bindgen]
 struct Ranker {
     query: String,
+    total_possible_match_length: u8,
+    query_regex: Regex,
     search_results: Vec<SearchResult>,
 }
 
 #[wasm_bindgen]
 impl Ranker {
     pub fn new(query: &str) -> Ranker {
+        let (query_regex, total_possible_match_length) = get_query_regex(query);
         Ranker {
             query: query.to_string(),
+            query_regex,
+            total_possible_match_length,
             search_results: Vec::new(),
         }
     }
@@ -79,33 +104,81 @@ impl Ranker {
 }
 
 
-fn get_query_regex(query: &str) -> regex::Regex {
-    let query = "\\b".to_owned() + query
+fn get_query_regex(query: &str) -> (Regex, u8) {
+    let unique_query_terms = query
         .split_whitespace()
         .map(|word| regex::escape(word))
+        .collect::<HashSet<String>>();
+    let query = "\\b".to_owned() + unique_query_terms.clone().into_iter()
         .collect::<Vec<String>>()
         .join("\\b|\\b").as_str() + "\\b";
-    regex::Regex::new(&query).unwrap()
+    let term_length_sum: usize = unique_query_terms.iter().map(|term| term.len()).sum();
+    let term_length_sum = u8::try_from(term_length_sum).unwrap_or(u8::MAX);
+    (Regex::new(&query).unwrap(), term_length_sum)
 }
 
-fn get_features(query_tokens: Vec<&str>, search_result: SearchResult) -> HashMap<&str, f64> {
-    let mut features = HashMap::new();
-
+fn get_features(query_regex: Regex, search_result: SearchResult) -> Features {
     let parsed_url =
         url::Url::parse(&search_result.url).unwrap_or(Url::parse(MISSING_URL).unwrap());
     let domain = parsed_url.domain().unwrap_or("");
     let path = parsed_url.path();
 
-    for (part, name, is_url) in [
+    let match_features: [MatchFeatures; 4];
+    for (i, (part, name, is_url)) in [
         (search_result.title.as_str(), "title", false),
         (search_result.extract.as_str(), "extract", false),
         (domain, "domain", true),
         (path, "path", true),
-    ] {
-        features.insert(name, 1.0);
+    ].iter().enumerate() {
+        let matches = query_regex.find_iter(part);
+        let mut last_match_char = 1;
+        let mut seen_terms = HashSet::new();
+        let mut match_length = 0;
+        for m in matches {
+            let match_term = m.as_str();
+            if seen_terms.contains(match_term) {
+                continue;
+            }
+            seen_terms.insert(match_term);
+            last_match_char = m.end() as u8;
+            match_length += m.end() - m.start();
+        }
     }
 
-    features
+    Features {
+        title_match: MatchFeatures {
+            last_char: 0,
+            length: 0,
+            total_possible_length: 0,
+            num_terms: 0,
+            score: 0.0,
+            term_proportion: 0.0,
+        },
+        extract_match: MatchFeatures {
+            last_char: 0,
+            length: 0,
+            total_possible_length: 0,
+            num_terms: 0,
+            score: 0.0,
+            term_proportion: 0.0,
+        },
+        domain_match: MatchFeatures {
+            last_char: 0,
+            length: 0,
+            total_possible_length: 0,
+            num_terms: 0,
+            score: 0.0,
+            term_proportion: 0.0,
+        },
+        path_match: MatchFeatures {
+            last_char: 0,
+            length: 0,
+            total_possible_length: 0,
+            num_terms: 0,
+            score: 0.0,
+            term_proportion: 0.0,
+        },
+    }
 }
 
 #[cfg(test)]
@@ -120,8 +193,9 @@ mod tests {
 
     #[test]
     fn test_get_query_regex() {
-        let query = "web page";
-        let regex = super::get_query_regex(query);
-        assert_eq!(regex.as_str(), "\\bweb\\b|\\bpage\\b");
+        let query = "web web";
+        let (regex, max_length) = super::get_query_regex(query);
+        assert_eq!(regex.as_str(), "\\bweb\\b");
+        assert_eq!(max_length, 3);
     }
 }
