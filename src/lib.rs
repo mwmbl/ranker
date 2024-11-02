@@ -2,15 +2,15 @@ mod utils;
 
 use arrayvec::ArrayString;
 use regex::Regex;
-use std::cmp::max;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use url::Url;
 use wasm_bindgen::prelude::*;
+use serde::{Deserialize, Serialize};
 
-const MAX_URL_LENGTH: usize = 150;
-const MAX_TITLE_LENGTH: usize = 65;
-const MAX_EXTRACT_LENGTH: usize = 155;
+const MAX_URL_LENGTH: usize = 200;
+const MAX_TITLE_LENGTH: usize = 100;
+const MAX_EXTRACT_LENGTH: usize = 200;
 const MATCH_EXPONENT: f64 = 2.0;
 
 const MISSING_URL: &str = "https://_.com";
@@ -25,6 +25,20 @@ pub fn greet() {
     alert("Hello, ranker!");
 }
 
+fn shorten_string(s: &str, max_length: usize) -> &str {
+    // Shorten the string but check that we don't slice within a character
+    if s.len() <= max_length {
+        return s;
+    }
+
+    let mut end = max_length;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+#[derive(Clone, Copy, Debug)]
 struct SearchResult {
     pub url: ArrayString<MAX_URL_LENGTH>,
     pub title: ArrayString<MAX_TITLE_LENGTH>,
@@ -33,25 +47,11 @@ struct SearchResult {
 
 impl SearchResult {
     pub fn new(url: &str, title: &str, extract: &str) -> SearchResult {
+        console_error_panic_hook::set_once();
         SearchResult {
-            url: ArrayString::from(if url.len() > MAX_URL_LENGTH {
-                &url[..MAX_URL_LENGTH]
-            } else {
-                url
-            })
-            .unwrap(),
-            title: ArrayString::from(if title.len() > MAX_TITLE_LENGTH {
-                &url[..MAX_TITLE_LENGTH]
-            } else {
-                title
-            })
-            .unwrap(),
-            extract: ArrayString::from(if extract.len() > MAX_EXTRACT_LENGTH {
-                &url[..MAX_EXTRACT_LENGTH]
-            } else {
-                extract
-            })
-            .unwrap(),
+            url: ArrayString::from(shorten_string(url, MAX_URL_LENGTH)).unwrap(),
+            title: ArrayString::from(shorten_string(title, MAX_TITLE_LENGTH)).unwrap(),
+            extract: ArrayString::from(shorten_string(extract, MAX_EXTRACT_LENGTH)).unwrap(),
         }
     }
 }
@@ -103,6 +103,18 @@ impl Ranker {
 
     pub fn len(&self) -> usize {
         self.search_results.len()
+    }
+
+    // Return the index of each search result in the order of the rank
+    pub fn rank(&self) -> Vec<usize> {
+        let mut ranked_results = self
+            .search_results
+            .iter()
+            .enumerate()
+            .map(|(i, result)| (i, score_result(self.query_regex.clone(), result.clone(), self.total_possible_match_length, self.num_unique_terms)))
+            .collect::<Vec<(usize, f32)>>();
+        ranked_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        ranked_results.iter().map(|(i, _)| i.clone()).collect()
     }
 }
 
