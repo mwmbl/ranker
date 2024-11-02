@@ -125,6 +125,26 @@ fn get_query_regex(query: &str) -> (Regex, u8, u8) {
     (Regex::new(&query).unwrap(), num_unique_terms, term_length_sum)
 }
 
+fn score_result(
+    query_regex: Regex,
+    search_result: SearchResult,
+    total_possible_length: u8,
+    num_unique_terms: u8,
+) -> f32 {
+    let features = get_features(query_regex, search_result, total_possible_length, num_unique_terms);
+    let length_penalty = f32::exp(-0.04 * search_result.url.len() as f32);
+    let match_score = (4.0 * features.title_match.score
+        + features.extract_match.score
+        + 4.0 * features.domain_match.score // TODO: use tokenized domain match as well
+        + 2.0 * features.path_match.score);
+
+    // TODO: check the minimum number of terms matching
+    // TODO: get domain score
+
+    match_score * length_penalty / 10.0
+}
+
+
 fn get_features(
     query_regex: Regex,
     search_result: SearchResult,
