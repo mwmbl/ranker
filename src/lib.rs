@@ -113,6 +113,16 @@ impl Ranker {
         }
     }
 
+    pub fn get_query_terms(&self) -> JsValue {
+        let tokens = self.query.split_whitespace().collect::<Vec<&str>>();
+        let bigrams = tokens.windows(2).map(|pair| pair.join(" ")).collect::<Vec<String>>();
+        let unique_tokens = tokens.iter().map(|s| s.to_string()).collect::<HashSet<String>>();
+        let unique_bigrams = bigrams.iter().collect::<HashSet<&String>>();
+        let mut terms = unique_tokens.iter().collect::<Vec<&String>>();
+        terms.extend(unique_bigrams.iter());
+        serde_wasm_bindgen::to_value(&terms).unwrap()
+    }
+
     pub fn add_search_result(&mut self, url: &str, title: &str, extract: &str) {
         self.search_results
             .push(SearchResult::new(url, title, extract));
