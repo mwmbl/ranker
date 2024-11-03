@@ -2,11 +2,12 @@ mod utils;
 
 use arrayvec::ArrayString;
 use regex::Regex;
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::HashSet;
 use std::convert::TryFrom;
+use serde::ser::SerializeStruct;
 use url::Url;
 use wasm_bindgen::prelude::*;
-use serde::{Deserialize, Serialize};
 
 const MAX_URL_LENGTH: usize = 200;
 const MAX_TITLE_LENGTH: usize = 100;
@@ -44,6 +45,22 @@ struct SearchResult {
     pub title: ArrayString<MAX_TITLE_LENGTH>,
     pub extract: ArrayString<MAX_EXTRACT_LENGTH>,
 }
+
+impl Serialize for SearchResult {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("SearchResult", 3)?;
+
+        state.serialize_field("url", &self.url.as_str())?;
+        state.serialize_field("title", &self.title.as_str())?;
+        state.serialize_field("extract", &self.extract.as_str())?;
+        state.end()
+    }
+}
+
+
 
 impl SearchResult {
     pub fn new(url: &str, title: &str, extract: &str) -> SearchResult {
@@ -106,15 +123,25 @@ impl Ranker {
     }
 
     // Return the index of each search result in the order of the rank
-    pub fn rank(&self) -> Vec<usize> {
-        let mut ranked_results = self
+    pub fn rank(&self) -> JsValue {
+        let mut scored_results = self
             .search_results
             .iter()
-            .enumerate()
-            .map(|(i, result)| (i, score_result(self.query_regex.clone(), result.clone(), self.total_possible_match_length, self.num_unique_terms)))
-            .collect::<Vec<(usize, f32)>>();
-        ranked_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        ranked_results.iter().map(|(i, _)| i.clone()).collect()
+            .map(|result| {
+                (
+                    result,
+                    score_result(
+                        self.query_regex.clone(),
+                        *result,
+                        self.total_possible_match_length,
+                        self.num_unique_terms,
+                    ),
+                )
+            })
+            .collect::<Vec<(&SearchResult, f32)>>();
+        scored_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        let ranked_results: Vec<&SearchResult> = scored_results.iter().map(|(i, _)| i.clone()).collect();
+        serde_wasm_bindgen::to_value(&ranked_results).unwrap()
     }
 }
 
@@ -134,7 +161,11 @@ fn get_query_regex(query: &str) -> (Regex, u8, u8) {
     let term_length_sum: usize = unique_query_terms.iter().map(|term| term.len()).sum();
     let term_length_sum = u8::try_from(term_length_sum).unwrap_or(u8::MAX);
     let num_unique_terms = u8::try_from(unique_query_terms.len()).unwrap_or(u8::MAX);
-    (Regex::new(&query).unwrap(), num_unique_terms, term_length_sum)
+    (
+        Regex::new(&query).unwrap(),
+        num_unique_terms,
+        term_length_sum,
+    )
 }
 
 fn score_result(
@@ -143,7 +174,12 @@ fn score_result(
     total_possible_length: u8,
     num_unique_terms: u8,
 ) -> f32 {
-    let features = get_features(query_regex, search_result, total_possible_length, num_unique_terms);
+    let features = get_features(
+        query_regex,
+        search_result,
+        total_possible_length,
+        num_unique_terms,
+    );
     let length_penalty = f32::exp(-0.04 * search_result.url.len() as f32);
     let match_score = (4.0 * features.title_match.score
         + features.extract_match.score
@@ -155,7 +191,6 @@ fn score_result(
 
     match_score * length_penalty / 10.0
 }
-
 
 fn get_features(
     query_regex: Regex,
@@ -255,7 +290,12 @@ mod tests {
         let query = "url";
         let (regex, num_unique_terms, total_possible_length) = super::get_query_regex(query);
         let search_result = super::SearchResult::new("https://en.wikipedia.org/wiki/URL", " URL", "A URL is a reference to a web resource that specifies its location on a computer network and a mechanism for retrieving it.");
-        let features = super::get_features(regex, search_result, total_possible_length, num_unique_terms);
+        let features = super::get_features(
+            regex,
+            search_result,
+            total_possible_length,
+            num_unique_terms,
+        );
         println!("{:#?}", features);
         assert_eq!(features.title_match.length, 3);
         assert_eq!(features.title_match.last_char, 4);

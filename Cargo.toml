@@ -23,6 +23,7 @@ arrayvec = "0.7.6"
 url = "2.5.2"
 regex = "1.11.0"
 serde = { version = "1.0.214", features = ["derive"] }
+serde-wasm-bindgen = "0.6.5"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"

@@ -15,19 +15,22 @@ searchButton.addEventListener("click", async (e) => {
   let data = await response.json();
   console.log("Data", data);
   data.results.forEach((result) => {
-    // Check for nulls
-    if (result.url == null) {
-      result.url = "";
-    }
-    if (result.title == null) {
-      result.title = "";
-    }
-    if (result.extract == null) {
-      result.extract = "";
-    }
     ranker.add_search_result(result.url, result.title, result.extract);
   });
   let rankedData = ranker.rank();
   console.log(rankedData);
+
+  // Insert into the output div
+  let outputDiv = document.getElementById("output");
+  outputDiv.innerHTML = "";
+  rankedData.forEach((result) => {
+    let div = document.createElement("div");
+    div.innerHTML = `
+      <h3>${result.title}</h3>
+      <p>${result.extract}</p>
+      <a href="${result.url}">result.url</a>
+    `;
+    outputDiv.appendChild(div);
+  });
 });
 
