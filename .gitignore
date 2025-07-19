@@ -6,3 +6,10 @@ pkg/
 wasm-pack.log
 .idea
 *~
+
+# Makefile temporary files
+.tmp_token
+.tmp_job_id
+
+# Environment files
+.env
